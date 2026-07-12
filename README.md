@@ -28,7 +28,7 @@
 ## Installation:  
 **Via Go:**  
 ```shell
-go install github.com/thebadinteger/p2pwn@latest
+go install github.com/thebadinteger/p2pwn@main
 ```  
 **Build from source:**  
 ```shell
