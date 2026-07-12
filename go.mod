@@ -1,4 +1,4 @@
-module p2pwn
+module github.com/thebadinteger/p2pwn
 
 go 1.26
 
