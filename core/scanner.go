@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"p2pwn/core/p2p"
+	"github.com/thebadinteger/p2pwn/core/p2p"
 )
 
 type Scanner struct {

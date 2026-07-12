@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"p2pwn/core"
+	"github.com/thebadinteger/p2pwn/core"
 )
 
 func xorDecode(data []byte, key byte) string {
