@@ -1523,6 +1523,26 @@ func (t *PTCPTunnel) SetChannelTitle(channel int, name string) error {
 	return nil
 }
 
+func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		path := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text[%d]=%s",
+			channel, i, urlEncode(line))
+		req := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", path)
+		resp, err := t.DoHTTPAuth([]byte(req), 10*time.Second)
+		if err != nil {
+			return fmt.Errorf("SetOverlayText CGI line %d: %w", i, err)
+		}
+		body := strings.TrimSpace(string(extractBody(resp)))
+		if !strings.EqualFold(body, "OK") {
+			return fmt.Errorf("SetOverlayText CGI line %d error: %s", i, body)
+		}
+	}
+	return nil
+}
+
 func urlEncode(s string) string {
 	var buf strings.Builder
 	for _, c := range []byte(s) {

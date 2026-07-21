@@ -25,3 +25,8 @@ credentials = [
 [dummy] # Credentials for "dummy" account added via CVE
 login = "p2pwn" # 5-32 alphanumeric characters
 password = "p2password" # 8-32 alphanumeric characters
+
+[brand] # Branding settings applied after successful exploit
+enabled = false # Apply channel title and overlay text to pwned cameras
+channel_title = "" # Channel title template ({serial}, {model} placeholders)
+overlay_text = ["", "", "", "", ""] # Overlay text lines (up to 5 lines, supports {serial}, {model})
