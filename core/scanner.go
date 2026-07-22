@@ -227,7 +227,9 @@ func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *Expl
 	if s.Config.Brand.ChannelTitle != "" {
 		title := replacePlaceholders(s.Config.Brand.ChannelTitle)
 		for ch := 0; ch < res.Channels; ch++ {
-			tunnel.SetChannelTitle(ch, title)
+			if err := tunnel.SetChannelTitle(ch, title); err != nil {
+				fmt.Printf("[!] SetChannelTitle ch%d: %v\n", ch, err)
+			}
 		}
 	}
 
@@ -237,7 +239,9 @@ func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *Expl
 			lines[i] = replacePlaceholders(line)
 		}
 		for ch := 0; ch < res.Channels; ch++ {
-			tunnel.SetOverlayText(ch, lines)
+			if err := tunnel.SetOverlayText(ch, lines); err != nil {
+				fmt.Printf("[!] SetOverlayText ch%d: %v\n", ch, err)
+			}
 		}
 	}
 }
