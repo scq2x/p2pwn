@@ -1523,6 +1523,51 @@ func (t *PTCPTunnel) SetChannelTitle(channel int, name string) error {
 	return nil
 }
 
+func (t *PTCPTunnel) rpc2SetConfig(params map[string]interface{}, timeout time.Duration) error {
+	body, _ := json.Marshal(map[string]interface{}{
+		"method": "configManager.setConfig",
+		"params": params,
+		"id":     time.Now().UnixMilli() & 0xFFFF,
+	})
+	req := fmt.Sprintf("POST /RPC2 HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
+		len(body), body)
+	resp, err := t.DoHTTPAuth([]byte(req), timeout)
+	if err != nil {
+		return err
+	}
+	b := extractBody(resp)
+	var rpcResp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(b, &rpcResp); err != nil {
+		return fmt.Errorf("rpc2 parse: %w", err)
+	}
+	if rpcResp.Error != nil {
+		return fmt.Errorf("rpc2 error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+	return nil
+}
+
+func (t *PTCPTunnel) cgiSetSlot(channel, idx int, text string, blend bool) error {
+	u := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[%d].Text=%s&VideoWidget[%d].CustomTitle[%d].EncodeBlend=%t&VideoWidget[%d].CustomTitle[%d].PreviewBlend=%t",
+		channel, idx, urlEncode(text),
+		channel, idx, blend,
+		channel, idx, blend)
+	r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", u)
+	resp, err := t.DoHTTPAuth([]byte(r), 10*time.Second)
+	if err != nil {
+		return err
+	}
+	b := strings.TrimSpace(string(extractBody(resp)))
+	if strings.EqualFold(b, "OK") {
+		return nil
+	}
+	return fmt.Errorf("%s", b)
+}
+
 func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	var nonEmpty []string
 	for _, line := range lines {
@@ -1533,64 +1578,54 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	if len(nonEmpty) == 0 {
 		return nil
 	}
-	// Most cameras have only 4 CustomTitle slots (0-3)
 	if len(nonEmpty) > 4 {
 		nonEmpty = nonEmpty[:4]
 	}
 	text := strings.Join(nonEmpty, "\n")
 
-	trySet := func(uPath string) (bool, error) {
-		r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", uPath)
-		resp, e := t.DoHTTPAuth([]byte(r), 10*time.Second)
-		if e != nil {
-			return false, e
-		}
-		b := strings.TrimSpace(string(extractBody(resp)))
-		if strings.EqualFold(b, "OK") {
-			return true, nil
-		}
-		return false, fmt.Errorf("%s", b)
-	}
-
-	// Phase 1: clear all overlays to default
+	// Build all 4 slot params (empty for unused slots, blend=false; our text for used, blend=true)
+	params := map[string]interface{}{}
 	for i := 0; i < 4; i++ {
-		delURL := fmt.Sprintf("/cgi-bin/configManager.cgi?action=deleteConfig&name=VideoWidget[%d].CustomTitle[%d].Text",
-			channel, i)
-		ok, _ := trySet(delURL)
-		if ok {
-			continue
+		slotText := ""
+		blend := false
+		if i < len(nonEmpty) {
+			slotText = nonEmpty[i]
+			blend = true
 		}
-		// Fallback: set empty text + disable blend
-		clearURL := fmt.Sprintf(
-			"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[%d].Text=&VideoWidget[%d].CustomTitle[%d].EncodeBlend=false&VideoWidget[%d].CustomTitle[%d].PreviewBlend=false",
-			channel, i, channel, i, channel, i)
-		trySet(clearURL)
+		prefix := fmt.Sprintf("VideoWidget[%d].CustomTitle[%d]", channel, i)
+		params[prefix+".Text"] = slotText
+		params[prefix+".EncodeBlend"] = blend
+		params[prefix+".PreviewBlend"] = blend
 	}
-	// Also clear OSD text (for models without VideoWidget)
-	trySet(fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=", channel))
+	params[fmt.Sprintf("OSD[%d].Text", channel)] = ""
 
-	// Phase 2: set our text lines in slots 0..N-1
+	// Try RPC2 first (primary API on newer firmwares)
+	if err := t.rpc2SetConfig(params, 10*time.Second); err == nil {
+		return nil
+	}
+
+	// Fallback: CGI per-slot (clearing + setting)
+	// Clear all slots first (ignore per-slot errors; some cameras have <4 slots)
+	for i := 0; i < 4; i++ {
+		t.cgiSetSlot(channel, i, "", false)
+	}
+	// Set our lines
 	for i, line := range nonEmpty {
-		url := fmt.Sprintf(
-			"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[%d].Text=%s&VideoWidget[%d].CustomTitle[%d].EncodeBlend=true&VideoWidget[%d].CustomTitle[%d].PreviewBlend=true",
-			channel, i, urlEncode(line),
-			channel, i,
-			channel, i,
-		)
-		ok, err := trySet(url)
-		if ok {
-			continue
+		if err := t.cgiSetSlot(channel, i, line, true); err != nil {
+			// Last resort: OSD single value
+			osdURL := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
+				channel, urlEncode(text))
+			r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", osdURL)
+			resp, e := t.DoHTTPAuth([]byte(r), 10*time.Second)
+			if e != nil {
+				return fmt.Errorf("SetOverlayText CGI slot %d: %v (OSD: %v)", i, err, e)
+			}
+			b := strings.TrimSpace(string(extractBody(resp)))
+			if strings.EqualFold(b, "OK") {
+				return nil
+			}
+			return fmt.Errorf("SetOverlayText CGI slot %d: %s", i, strings.TrimSpace(err.Error()))
 		}
-		if strings.Contains(err.Error(), "Authorization Failed") {
-			return fmt.Errorf("SetOverlayText CGI: %w", err)
-		}
-		// Fallback: OSD single value with newlines
-		fallback := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
-			channel, urlEncode(text))
-		if ok, _ := trySet(fallback); ok {
-			return nil
-		}
-		return fmt.Errorf("SetOverlayText CGI: %s", strings.TrimSpace(err.Error()))
 	}
 	return nil
 }
