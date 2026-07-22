@@ -1533,6 +1533,10 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	if len(nonEmpty) == 0 {
 		return nil
 	}
+	// Most cameras have only 4 CustomTitle slots (0-3)
+	if len(nonEmpty) > 4 {
+		nonEmpty = nonEmpty[:4]
+	}
 	text := strings.Join(nonEmpty, "\n")
 
 	trySet := func(uPath string) (bool, error) {
@@ -1548,30 +1552,40 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 		return false, fmt.Errorf("%s", b)
 	}
 
-	// Set each line as separate CustomTitle (confirmed on IPC-K15/A35 etc.)
-	for i, line := range nonEmpty {
-		path := fmt.Sprintf(
-			"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[%d].Text=%s&VideoWidget[%d].CustomTitle[%d].EncodeBlend=true&VideoWidget[%d].CustomTitle[%d].PreviewBlend=true",
-			channel, i, urlEncode(line),
-			channel, i,
-			channel, i,
-		)
-		ok, err := trySet(path)
-		if ok {
-			continue
+	tryAllCustom := func() (int, error) {
+		for i, line := range nonEmpty {
+			path := fmt.Sprintf(
+				"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[%d].Text=%s&VideoWidget[%d].CustomTitle[%d].EncodeBlend=true&VideoWidget[%d].CustomTitle[%d].PreviewBlend=true",
+				channel, i, urlEncode(line),
+				channel, i,
+				channel, i,
+			)
+			ok, err := trySet(path)
+			if ok {
+				continue
+			}
+			if strings.Contains(err.Error(), "Authorization Failed") {
+				return i, err
+			}
+			return i, fmt.Errorf("line %d: %s", i, strings.TrimSpace(err.Error()))
 		}
-		if strings.Contains(err.Error(), "Authorization Failed") {
-			return fmt.Errorf("SetOverlayText CGI: %w", err)
-		}
-		// Fallback: OSD single value
-		path2 := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
-			channel, urlEncode(text))
-		if ok2, _ := trySet(path2); ok2 {
-			return nil
-		}
-		return fmt.Errorf("SetOverlayText CGI line %d error: %s", i, err)
+		return -1, nil
 	}
-	return nil
+
+	errIdx, err := tryAllCustom()
+	if errIdx < 0 {
+		return nil // all lines set via CustomTitle
+	}
+	if strings.Contains(err.Error(), "Authorization Failed") {
+		return fmt.Errorf("SetOverlayText CGI: %w", err)
+	}
+	// Fallback: OSD single value
+	fallback := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
+		channel, urlEncode(text))
+	if ok, _ := trySet(fallback); ok {
+		return nil
+	}
+	return fmt.Errorf("SetOverlayText CGI: %s", err)
 }
 
 func urlEncode(s string) string {
