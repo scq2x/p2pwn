@@ -12,6 +12,7 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1523,11 +1524,22 @@ func (t *PTCPTunnel) SetChannelTitle(channel int, name string) error {
 	return nil
 }
 
-func (t *PTCPTunnel) rpc2SetConfig(params map[string]interface{}, timeout time.Duration) error {
+func (t *PTCPTunnel) rpc2Session() int {
+	sid := 0
+	if t.client.sessionID != "" {
+		sid, _ = strconv.Atoi(t.client.sessionID)
+	}
+	return sid
+}
+
+func (t *PTCPTunnel) rpc2Multicall(calls []map[string]interface{}, timeout time.Duration) error {
+	outerID := time.Now().UnixMilli() & 0xFFFF
+	session := t.rpc2Session()
 	body, _ := json.Marshal(map[string]interface{}{
-		"method": "configManager.setConfig",
-		"params": params,
-		"id":     time.Now().UnixMilli() & 0xFFFF,
+		"method":  "system.multicall",
+		"params":  calls,
+		"id":      outerID,
+		"session": session,
 	})
 	req := fmt.Sprintf("POST /RPC2 HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
 		len(body), body)
@@ -1583,8 +1595,10 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	}
 	text := strings.Join(nonEmpty, "\n")
 
-	// Build all 4 slot params (empty for unused slots, blend=false; our text for used, blend=true)
-	params := map[string]interface{}{}
+	// Try RPC2 system.multicall: a call per slot (clear unused + set ours)
+	session := t.rpc2Session()
+	callID := int(time.Now().UnixMilli() & 0xFF)
+	var calls []map[string]interface{}
 	for i := 0; i < 4; i++ {
 		slotText := ""
 		blend := false
@@ -1592,27 +1606,39 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 			slotText = nonEmpty[i]
 			blend = true
 		}
-		prefix := fmt.Sprintf("VideoWidget[%d].CustomTitle[%d]", channel, i)
-		params[prefix+".Text"] = slotText
-		params[prefix+".EncodeBlend"] = blend
-		params[prefix+".PreviewBlend"] = blend
+		callID++
+		calls = append(calls, map[string]interface{}{
+			"method": "configManager.setConfig",
+			"params": map[string]interface{}{
+				fmt.Sprintf("VideoWidget[%d].CustomTitle[%d].Text", channel, i):        slotText,
+				fmt.Sprintf("VideoWidget[%d].CustomTitle[%d].EncodeBlend", channel, i):  blend,
+				fmt.Sprintf("VideoWidget[%d].CustomTitle[%d].PreviewBlend", channel, i): blend,
+			},
+			"id":      callID,
+			"session": session,
+		})
 	}
-	params[fmt.Sprintf("OSD[%d].Text", channel)] = ""
+	// Also clear OSD
+	callID++
+	calls = append(calls, map[string]interface{}{
+		"method": "configManager.setConfig",
+		"params": map[string]interface{}{
+			fmt.Sprintf("OSD[%d].Text", channel): "",
+		},
+		"id":      callID,
+		"session": session,
+	})
 
-	// Try RPC2 first (primary API on newer firmwares)
-	if err := t.rpc2SetConfig(params, 10*time.Second); err == nil {
+	if err := t.rpc2Multicall(calls, 10*time.Second); err == nil {
 		return nil
 	}
 
-	// Fallback: CGI per-slot (clearing + setting)
-	// Clear all slots first (ignore per-slot errors; some cameras have <4 slots)
+	// Fallback: CGI per-slot
 	for i := 0; i < 4; i++ {
 		t.cgiSetSlot(channel, i, "", false)
 	}
-	// Set our lines
 	for i, line := range nonEmpty {
 		if err := t.cgiSetSlot(channel, i, line, true); err != nil {
-			// Last resort: OSD single value
 			osdURL := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
 				channel, urlEncode(text))
 			r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", osdURL)
