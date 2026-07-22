@@ -1552,44 +1552,47 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 		return false, fmt.Errorf("%s", b)
 	}
 
-	slotURL := func(idx int, text string, blend bool) string {
-		return fmt.Sprintf("VideoWidget[%d].CustomTitle[%d].Text=%s&VideoWidget[%d].CustomTitle[%d].EncodeBlend=%t&VideoWidget[%d].CustomTitle[%d].PreviewBlend=%t",
-			channel, idx, urlEncode(text),
-			channel, idx, blend,
-			channel, idx, blend)
-	}
-
-	// Phase 1: clear all 4 slots in one request, removing old text
-	clearURL := "/cgi-bin/configManager.cgi?action=setConfig"
+	// Phase 1: clear all overlays to default
 	for i := 0; i < 4; i++ {
-		clearURL += "&" + slotURL(i, "", false)
-	}
-	trySet(clearURL) // ignore clear errors (cameras with <4 slots)
-
-	// Phase 2: set our text + ensure unused slots stay empty
-	setURL := "/cgi-bin/configManager.cgi?action=setConfig"
-	for i := 0; i < 4; i++ {
-		if i < len(nonEmpty) {
-			setURL += "&" + slotURL(i, nonEmpty[i], true)
-		} else {
-			setURL += "&" + slotURL(i, "", false)
+		delURL := fmt.Sprintf("/cgi-bin/configManager.cgi?action=deleteConfig&name=VideoWidget[%d].CustomTitle[%d].Text",
+			channel, i)
+		ok, _ := trySet(delURL)
+		if ok {
+			continue
 		}
+		// Fallback: set empty text + disable blend
+		clearURL := fmt.Sprintf(
+			"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[%d].Text=&VideoWidget[%d].CustomTitle[%d].EncodeBlend=false&VideoWidget[%d].CustomTitle[%d].PreviewBlend=false",
+			channel, i, channel, i, channel, i)
+		trySet(clearURL)
 	}
-	ok, err := trySet(setURL)
-	if ok {
-		return nil
-	}
-	if strings.Contains(err.Error(), "Authorization Failed") {
-		return fmt.Errorf("SetOverlayText CGI: %w", err)
-	}
+	// Also clear OSD text (for models without VideoWidget)
+	trySet(fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=", channel))
 
-	// Fallback: OSD single value
-	fallback := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
-		channel, urlEncode(text))
-	if ok, _ := trySet(fallback); ok {
-		return nil
+	// Phase 2: set our text lines in slots 0..N-1
+	for i, line := range nonEmpty {
+		url := fmt.Sprintf(
+			"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[%d].Text=%s&VideoWidget[%d].CustomTitle[%d].EncodeBlend=true&VideoWidget[%d].CustomTitle[%d].PreviewBlend=true",
+			channel, i, urlEncode(line),
+			channel, i,
+			channel, i,
+		)
+		ok, err := trySet(url)
+		if ok {
+			continue
+		}
+		if strings.Contains(err.Error(), "Authorization Failed") {
+			return fmt.Errorf("SetOverlayText CGI: %w", err)
+		}
+		// Fallback: OSD single value with newlines
+		fallback := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
+			channel, urlEncode(text))
+		if ok, _ := trySet(fallback); ok {
+			return nil
+		}
+		return fmt.Errorf("SetOverlayText CGI: %s", strings.TrimSpace(err.Error()))
 	}
-	return fmt.Errorf("SetOverlayText CGI: %s", strings.TrimSpace(err.Error()))
+	return nil
 }
 
 func urlEncode(s string) string {
