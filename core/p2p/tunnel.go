@@ -1552,40 +1552,44 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 		return false, fmt.Errorf("%s", b)
 	}
 
-	tryAllCustom := func() (int, error) {
-		for i, line := range nonEmpty {
-			path := fmt.Sprintf(
-				"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[%d].Text=%s&VideoWidget[%d].CustomTitle[%d].EncodeBlend=true&VideoWidget[%d].CustomTitle[%d].PreviewBlend=true",
-				channel, i, urlEncode(line),
-				channel, i,
-				channel, i,
-			)
-			ok, err := trySet(path)
-			if ok {
-				continue
-			}
-			if strings.Contains(err.Error(), "Authorization Failed") {
-				return i, err
-			}
-			return i, fmt.Errorf("line %d: %s", i, strings.TrimSpace(err.Error()))
-		}
-		return -1, nil
+	slotURL := func(idx int, text string, blend bool) string {
+		return fmt.Sprintf("VideoWidget[%d].CustomTitle[%d].Text=%s&VideoWidget[%d].CustomTitle[%d].EncodeBlend=%t&VideoWidget[%d].CustomTitle[%d].PreviewBlend=%t",
+			channel, idx, urlEncode(text),
+			channel, idx, blend,
+			channel, idx, blend)
 	}
 
-	errIdx, err := tryAllCustom()
-	if errIdx < 0 {
-		return nil // all lines set via CustomTitle
+	// Phase 1: clear all 4 slots in one request, removing old text
+	clearURL := "/cgi-bin/configManager.cgi?action=setConfig"
+	for i := 0; i < 4; i++ {
+		clearURL += "&" + slotURL(i, "", false)
+	}
+	trySet(clearURL) // ignore clear errors (cameras with <4 slots)
+
+	// Phase 2: set our text + ensure unused slots stay empty
+	setURL := "/cgi-bin/configManager.cgi?action=setConfig"
+	for i := 0; i < 4; i++ {
+		if i < len(nonEmpty) {
+			setURL += "&" + slotURL(i, nonEmpty[i], true)
+		} else {
+			setURL += "&" + slotURL(i, "", false)
+		}
+	}
+	ok, err := trySet(setURL)
+	if ok {
+		return nil
 	}
 	if strings.Contains(err.Error(), "Authorization Failed") {
 		return fmt.Errorf("SetOverlayText CGI: %w", err)
 	}
+
 	// Fallback: OSD single value
 	fallback := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
 		channel, urlEncode(text))
 	if ok, _ := trySet(fallback); ok {
 		return nil
 	}
-	return fmt.Errorf("SetOverlayText CGI: %s", err)
+	return fmt.Errorf("SetOverlayText CGI: %s", strings.TrimSpace(err.Error()))
 }
 
 func urlEncode(s string) string {
