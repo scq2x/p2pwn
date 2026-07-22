@@ -1535,22 +1535,18 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	}
 	text := strings.Join(nonEmpty, "\n")
 
-	// Try different Dahua CGI APIs for text overlay (newer to older firmware)
-	// 1. VideoWidget[].TextOverlay[].Text (newest IPC firmware)
-	// 2. VideoWidget[].CustomTitle[].Name (mid-range firmware)
-	// 3. OSD[].Text (older firmware)
-	// 4. OSD[].Text[i] (legacy indexed format)
-
-	trySet := func(uPath string) (bool, error) {
+	trySet := func(label, uPath string) (bool, error) {
 		r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", uPath)
 		resp, e := t.DoHTTPAuth([]byte(r), 10*time.Second)
 		if e != nil {
+			fmt.Printf("[debug] SetOverlayText %s tunnel error: %v\n", label, e)
 			return false, e
 		}
 		b := strings.TrimSpace(string(extractBody(resp)))
 		if strings.EqualFold(b, "OK") {
 			return true, nil
 		}
+		fmt.Printf("[debug] SetOverlayText %s camera response: %s\n", label, b)
 		return false, fmt.Errorf("%s", b)
 	}
 
@@ -1559,7 +1555,7 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 		"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].TextOverlay[0].Text=%s&VideoWidget[%d].TextOverlay[0].Enable=true",
 		channel, urlEncode(text), channel,
 	)
-	if ok, err := trySet(path1); ok {
+	if ok, err := trySet("VideoWidget+TextOverlay", path1); ok {
 		return nil
 	} else if strings.Contains(err.Error(), "Authorization Failed") {
 		return fmt.Errorf("SetOverlayText CGI: %w", err)
@@ -1570,7 +1566,7 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 		"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[0].Name=%s&VideoWidget[%d].CustomTitle[0].EncodeBlend=true&VideoWidget[%d].CustomTitle[0].Display=true",
 		channel, urlEncode(text), channel, channel,
 	)
-	if ok, err := trySet(path2); ok {
+	if ok, err := trySet("VideoWidget+CustomTitle", path2); ok {
 		return nil
 	} else if strings.Contains(err.Error(), "Authorization Failed") {
 		return fmt.Errorf("SetOverlayText CGI: %w", err)
@@ -1579,7 +1575,7 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	// 3. OSD single value
 	path3 := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
 		channel, urlEncode(text))
-	if ok, _ := trySet(path3); ok {
+	if ok, _ := trySet("OSD+Text", path3); ok {
 		return nil
 	}
 
@@ -1587,7 +1583,7 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	for i, line := range nonEmpty {
 		path4 := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text[%d]=%s",
 			channel, i, urlEncode(line))
-		ok, err := trySet(path4)
+		ok, err := trySet(fmt.Sprintf("OSD+Text[%d]", i), path4)
 		if ok {
 			continue
 		} else if strings.Contains(err.Error(), "Authorization Failed") {
