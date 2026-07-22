@@ -1656,6 +1656,21 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	return nil
 }
 
+func (t *PTCPTunnel) SetAudioVolume(speakerVolume, micVolume int) error {
+	path := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&Audio.GlobalSpeakerVolume=%d&Audio.GlobalMicVolume=%d",
+		speakerVolume, micVolume)
+	req := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", path)
+	resp, err := t.DoHTTPAuth([]byte(req), 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("SetAudioVolume CGI: %w", err)
+	}
+	body := strings.TrimSpace(string(extractBody(resp)))
+	if !strings.EqualFold(body, "OK") {
+		return fmt.Errorf("SetAudioVolume CGI error: %s", body)
+	}
+	return nil
+}
+
 func urlEncode(s string) string {
 	var buf strings.Builder
 	for _, c := range []byte(s) {

@@ -43,12 +43,19 @@ type BrandConfig struct {
 	OverlayText  []string `toml:"overlay_text"`
 }
 
+type AudioConfig struct {
+	Enabled        bool `toml:"enabled"`
+	SpeakerVolume  int  `toml:"speaker_volume"`
+	MicVolume      int  `toml:"mic_volume"`
+}
+
 type Config struct {
 	Scan  ScanConfig  `toml:"scan"`
 	Pwn   PwnConfig   `toml:"pwn"`
 	Brute BruteConfig `toml:"brute"`
 	Dummy DummyConfig `toml:"dummy"`
 	Brand BrandConfig `toml:"brand"`
+	Audio AudioConfig `toml:"audio"`
 	Path  string
 }
 
@@ -81,9 +88,14 @@ login = "p2pwn" # 5-32 alphanumeric characters
 password = "p2password" # 8-32 alphanumeric characters
 
 [brand] # Branding settings applied after successful exploit
-enabled = false # Apply channel title and overlay text to pwned cameras
-channel_title = "" # Channel title template ({serial}, {model} placeholders)
-overlay_text = ["", "", "", "", ""] # Overlay text lines (up to 5, supports {serial}, {model})
+enabled = true # Apply channel title and overlay text to pwned cameras
+channel_title = "#BOUQUET WORLDWIDE" # Channel title template ({serial}, {model} placeholders)
+overlay_text = ["BOUQUET4LIFE", "BOUQUET4LIFE", "BOUQUET4LIFE", "BOUQUET4LIFE"] # Overlay text lines (up to 5, supports {serial}, {model})
+
+[audio] # Audio volume settings applied after successful exploit
+enabled = true # Set speaker and microphone volume to 100%
+speaker_volume = 100 # Speaker volume level (0-100)
+mic_volume = 100 # Microphone volume level (0-100)
 `
 
 type Range struct {
@@ -222,6 +234,16 @@ func LoadConfig(path string, isDefault bool) (*Config, error) {
 	if conf.Brand.Enabled {
 		if len(conf.Brand.OverlayText) > 5 {
 			conf.Brand.OverlayText = conf.Brand.OverlayText[:5]
+		}
+	}
+
+	
+	if conf.Audio.Enabled {
+		if conf.Audio.SpeakerVolume < 0 || conf.Audio.SpeakerVolume > 100 {
+			return nil, fmt.Errorf("invalid speaker_volume in config (must be 0-100)")
+		}
+		if conf.Audio.MicVolume < 0 || conf.Audio.MicVolume > 100 {
+			return nil, fmt.Errorf("invalid mic_volume in config (must be 0-100)")
 		}
 	}
 
