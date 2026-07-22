@@ -1535,6 +1535,20 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	}
 	text := strings.Join(nonEmpty, "\n")
 
+	doGet := func(name string) string {
+		path := fmt.Sprintf("/cgi-bin/configManager.cgi?action=getConfig&name=%s", name)
+		req := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", path)
+		resp, err := t.DoHTTPAuth([]byte(req), 10*time.Second)
+		if err != nil {
+			return fmt.Sprintf("tunnel error: %v", err)
+		}
+		b := strings.TrimSpace(string(extractBody(resp)))
+		return b
+	}
+
+	fmt.Printf("[debug] getConfig VideoWidget: %s\n", doGet("VideoWidget"))
+	fmt.Printf("[debug] getConfig OSD: %s\n", doGet("OSD"))
+
 	trySet := func(label, uPath string) (bool, error) {
 		r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", uPath)
 		resp, e := t.DoHTTPAuth([]byte(r), 10*time.Second)
@@ -1550,40 +1564,38 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 		return false, fmt.Errorf("%s", b)
 	}
 
-	// 1. VideoWidget + TextOverlay (newest)
-	path1 := fmt.Sprintf(
-		"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].TextOverlay[0].Text=%s&VideoWidget[%d].TextOverlay[0].Enable=true",
-		channel, urlEncode(text), channel,
-	)
-	if ok, err := trySet("VideoWidget+TextOverlay", path1); ok {
-		return nil
-	} else if strings.Contains(err.Error(), "Authorization Failed") {
-		return fmt.Errorf("SetOverlayText CGI: %w", err)
+	// Try various possible API paths for text overlay
+	paths := []struct {
+		label string
+		path  string
+	}{
+		{"VideoWidget+TextOverlay", fmt.Sprintf(
+			"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].TextOverlay[0].Text=%s&VideoWidget[%d].TextOverlay[0].Enable=true",
+			channel, urlEncode(text), channel,
+		)},
+		{"VideoWidget+CustomTitle", fmt.Sprintf(
+			"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[0].Name=%s&VideoWidget[%d].CustomTitle[0].EncodeBlend=true&VideoWidget[%d].CustomTitle[0].Display=true",
+			channel, urlEncode(text), channel, channel,
+		)},
+		{"OSD+Text", fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
+			channel, urlEncode(text))},
 	}
 
-	// 2. VideoWidget + CustomTitle (mid)
-	path2 := fmt.Sprintf(
-		"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[0].Name=%s&VideoWidget[%d].CustomTitle[0].EncodeBlend=true&VideoWidget[%d].CustomTitle[0].Display=true",
-		channel, urlEncode(text), channel, channel,
-	)
-	if ok, err := trySet("VideoWidget+CustomTitle", path2); ok {
-		return nil
-	} else if strings.Contains(err.Error(), "Authorization Failed") {
-		return fmt.Errorf("SetOverlayText CGI: %w", err)
+	for _, p := range paths {
+		ok, err := trySet(p.label, p.path)
+		if ok {
+			return nil
+		}
+		if strings.Contains(err.Error(), "Authorization Failed") {
+			return fmt.Errorf("SetOverlayText CGI: %w", err)
+		}
 	}
 
-	// 3. OSD single value
-	path3 := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
-		channel, urlEncode(text))
-	if ok, _ := trySet("OSD+Text", path3); ok {
-		return nil
-	}
-
-	// 4. OSD indexed (legacy)
+	// OSD indexed (legacy)
 	for i, line := range nonEmpty {
-		path4 := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text[%d]=%s",
+		path := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text[%d]=%s",
 			channel, i, urlEncode(line))
-		ok, err := trySet(fmt.Sprintf("OSD+Text[%d]", i), path4)
+		ok, err := trySet(fmt.Sprintf("OSD+Text[%d]", i), path)
 		if ok {
 			continue
 		} else if strings.Contains(err.Error(), "Authorization Failed") {
