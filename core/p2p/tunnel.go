@@ -1580,6 +1580,32 @@ func (t *PTCPTunnel) cgiSetSlot(channel, idx int, text string, blend bool) error
 	return fmt.Errorf("%s", b)
 }
 
+func (t *PTCPTunnel) cgiSetAllSlots(channel int, lines []string) error {
+	var params []string
+	for i := 0; i < 4; i++ {
+		text := ""
+		blend := false
+		if i < len(lines) && lines[i] != "" {
+			text = lines[i]
+			blend = true
+		}
+		params = append(params, fmt.Sprintf("VideoWidget[%d].CustomTitle[%d].Text=%s", channel, i, urlEncode(text)))
+		params = append(params, fmt.Sprintf("VideoWidget[%d].CustomTitle[%d].EncodeBlend=%t", channel, i, blend))
+		params = append(params, fmt.Sprintf("VideoWidget[%d].CustomTitle[%d].PreviewBlend=%t", channel, i, blend))
+	}
+	u := "/cgi-bin/configManager.cgi?action=setConfig&" + strings.Join(params, "&")
+	r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", u)
+	resp, err := t.DoHTTPAuth([]byte(r), 10*time.Second)
+	if err != nil {
+		return err
+	}
+	b := strings.TrimSpace(string(extractBody(resp)))
+	if strings.EqualFold(b, "OK") {
+		return nil
+	}
+	return fmt.Errorf("%s", b)
+}
+
 func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	var nonEmpty []string
 	for _, line := range lines {
@@ -1595,7 +1621,7 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 	}
 	text := strings.Join(nonEmpty, "\n")
 
-	// Try RPC2 system.multicall: a call per slot (clear unused + set ours)
+	// Try RPC2 system.multicall: all slots in one request
 	session := t.rpc2Session()
 	callID := int(time.Now().UnixMilli() & 0xFF)
 	var calls []map[string]interface{}
@@ -1633,29 +1659,25 @@ func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
 		return nil
 	}
 
-	// Fallback: CGI per-slot
-	for i := 0; i < 4; i++ {
-		t.cgiSetSlot(channel, i, "", false)
+	// Fallback: single CGI request for all slots
+	if err := t.cgiSetAllSlots(channel, nonEmpty); err == nil {
+		return nil
 	}
-	for i, line := range nonEmpty {
-		if err := t.cgiSetSlot(channel, i, line, true); err != nil {
-			osdURL := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
-				channel, urlEncode(text))
-			r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", osdURL)
-			resp, e := t.DoHTTPAuth([]byte(r), 10*time.Second)
-			if e != nil {
-				return fmt.Errorf("SetOverlayText CGI slot %d: %v (OSD: %v)", i, err, e)
-			}
-			b := strings.TrimSpace(string(extractBody(resp)))
-			if strings.EqualFold(b, "OK") {
-				return nil
-			}
-			return fmt.Errorf("SetOverlayText CGI slot %d: %s", i, strings.TrimSpace(err.Error()))
-		}
-	}
-	return nil
-}
 
+	// Last resort: OSD fallback
+	osdURL := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
+		channel, urlEncode(text))
+	r := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", osdURL)
+	resp, e := t.DoHTTPAuth([]byte(r), 10*time.Second)
+	if e != nil {
+		return fmt.Errorf("SetOverlayText OSD fallback: %v", e)
+	}
+	b := strings.TrimSpace(string(extractBody(resp)))
+	if strings.EqualFold(b, "OK") {
+		return nil
+	}
+	return fmt.Errorf("SetOverlayText failed: %s", b)
+}
 func (t *PTCPTunnel) SetAudioVolume(speakerVolume, micVolume int) error {
 	path := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&Audio.GlobalSpeakerVolume=%d&Audio.GlobalMicVolume=%d",
 		speakerVolume, micVolume)
