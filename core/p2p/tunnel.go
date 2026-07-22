@@ -1524,23 +1524,46 @@ func (t *PTCPTunnel) SetChannelTitle(channel int, name string) error {
 }
 
 func (t *PTCPTunnel) SetOverlayText(channel int, lines []string) error {
-	for i, line := range lines {
-		if line == "" {
-			continue
-		}
-		path := fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text[%d]=%s",
-			channel, i, urlEncode(line))
-		req := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", path)
-		resp, err := t.DoHTTPAuth([]byte(req), 10*time.Second)
-		if err != nil {
-			return fmt.Errorf("SetOverlayText CGI line %d: %w", i, err)
-		}
-		body := strings.TrimSpace(string(extractBody(resp)))
-		if !strings.EqualFold(body, "OK") {
-			return fmt.Errorf("SetOverlayText CGI line %d error: %s", i, body)
+	var nonEmpty []string
+	for _, line := range lines {
+		if line != "" {
+			nonEmpty = append(nonEmpty, line)
 		}
 	}
-	return nil
+	if len(nonEmpty) == 0 {
+		return nil
+	}
+	text := strings.Join(nonEmpty, "\n")
+
+	// Try VideoWidget API (newer Dahua firmware: IPC-K15, A35, etc.)
+	path := fmt.Sprintf(
+		"/cgi-bin/configManager.cgi?action=setConfig&VideoWidget[%d].CustomTitle[0].Name=%s&VideoWidget[%d].CustomTitle[0].EncodeBlend=true&VideoWidget[%d].CustomTitle[0].Display=true",
+		channel, urlEncode(text), channel, channel,
+	)
+	req := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", path)
+	resp, err := t.DoHTTPAuth([]byte(req), 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("SetOverlayText CGI: %w", err)
+	}
+	body := strings.TrimSpace(string(extractBody(resp)))
+	if strings.EqualFold(body, "OK") {
+		return nil
+	}
+
+	// Fallback to OSD API (older Dahua firmware)
+	path = fmt.Sprintf("/cgi-bin/configManager.cgi?action=setConfig&OSD[%d].Text=%s",
+		channel, urlEncode(text))
+	req = fmt.Sprintf("GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n", path)
+	resp, err = t.DoHTTPAuth([]byte(req), 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("SetOverlayText CGI: %w", err)
+	}
+	body = strings.TrimSpace(string(extractBody(resp)))
+	if strings.EqualFold(body, "OK") {
+		return nil
+	}
+
+	return fmt.Errorf("SetOverlayText CGI error: %s", body)
 }
 
 func urlEncode(s string) string {
